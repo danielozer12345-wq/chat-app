@@ -3,34 +3,29 @@
   margin: 0;
   padding: 0;
   user-select: none;
+  -webkit-user-select: none;
   font-family: 'Courier New', Courier, monospace;
 }
 
-body {
-  width: 100vw;
-  height: 100vh;
+html, body {
+  width: 100%;
+  height: 100%;
+  height: 100dvh; /* גובה מותאם למסכי מובייל */
   overflow: hidden;
   background: #030712;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  touch-action: none; /* מונע גלילה וזום של הדפדפן */
 }
 
 /* זירת המשחק */
 .arena {
   position: relative;
   width: 100vw;
-  height: 100vh;
-  max-width: 1200px;
-  max-height: 800px;
+  height: 100dvh;
   overflow: hidden;
-  border: 2px solid rgba(0, 240, 255, 0.3);
-  box-shadow: inset 0 0 50px rgba(0, 240, 255, 0.2), 0 0 30px rgba(0, 240, 255, 0.2);
   background: #030712;
-  cursor: crosshair;
 }
 
-/* וידאו היריב (UDP) עם אפקט הולוגרמה */
+/* וידאו היריב (UDP) */
 #peer-video {
   position: absolute;
   top: 0;
@@ -55,7 +50,6 @@ body {
   z-index: 2;
 }
 
-/* ממשק HUD */
 .hud {
   position: absolute;
   top: 0;
@@ -66,15 +60,16 @@ body {
   z-index: 5;
 }
 
-/* התרעת פגיעה / החטאה */
 #alert-banner {
   position: absolute;
-  top: 25%;
+  top: 20%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 900;
-  letter-spacing: 3px;
+  letter-spacing: 2px;
+  text-align: center;
+  width: 90%;
   color: #ff0055;
   text-shadow: 0 0 15px #ff0055;
   opacity: 0;
@@ -83,24 +78,24 @@ body {
 
 #alert-banner.show {
   opacity: 1;
-  transform: translate(-50%, -50%) scale(1.1);
+  transform: translate(-50%, -50%) scale(1.05);
 }
 
-/* מדי חיים */
+/* פסי חיים רספונסיביים */
 .hp-bar {
   position: absolute;
-  width: 260px;
-  height: 16px;
+  width: 140px;
+  height: 14px;
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(0, 240, 255, 0.5);
   box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
   transform: skewX(-20deg);
   overflow: hidden;
-  padding: 2px;
+  padding: 1px;
 }
 
-.enemy-hp { top: 25px; left: 30px; border-color: #ff0055; }
-.my-hp { bottom: 30px; right: 30px; }
+.enemy-hp { top: 15px; left: 20px; border-color: #ff0055; }
+.my-hp { bottom: 20px; right: 20px; }
 
 .hp-bar .fill {
   width: 100%;
@@ -111,13 +106,13 @@ body {
 
 .enemy-hp .fill { background: linear-gradient(90deg, #ff0055, #ff5500); }
 
-/* כוונת עכבר דינמית עוקבת */
+/* כוונת לייזר */
 .target-crosshair {
   position: absolute;
   top: 0;
   left: 0;
-  width: 50px;
-  height: 50px;
+  width: 44px;
+  height: 44px;
   transform: translate(-50%, -50%);
   border: 2px solid #00f0ff;
   border-radius: 50%;
@@ -134,18 +129,18 @@ body {
 }
 
 .target-crosshair::before {
-  top: 50%; left: -6px; right: -6px; height: 2px; transform: translateY(-50%);
+  top: 50%; left: -5px; right: -5px; height: 2px; transform: translateY(-50%);
 }
 
 .target-crosshair::after {
-  left: 50%; top: -6px; bottom: -6px; width: 2px; transform: translateX(-50%);
+  left: 50%; top: -5px; bottom: -5px; width: 2px; transform: translateX(-50%);
 }
 
-/* נקודות נעילה על עיני היריב */
+/* נעילה על עיניים */
 .eye-target {
   position: absolute;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   transform: translate(-50%, -50%);
   border: 2px dashed #ff0055;
   border-radius: 50%;
@@ -159,14 +154,13 @@ body {
   100% { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
-/* רעידת מסך בפגיעה */
 .screen-hit {
   animation: hitShake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
 
 @keyframes hitShake {
-  10%, 90% { transform: translate3d(-4px, -2px, 0); filter: brightness(2) drop-shadow(0 0 30px red); }
-  20%, 80% { transform: translate3d(6px, 4px, 0); }
-  30%, 50%, 70% { transform: translate3d(-8px, -6px, 0); }
-  40%, 60% { transform: translate3d(8px, 6px, 0); }
+  10%, 90% { transform: translate3d(-3px, -2px, 0); filter: brightness(2) drop-shadow(0 0 25px red); }
+  20%, 80% { transform: translate3d(5px, 3px, 0); }
+  30%, 50%, 70% { transform: translate3d(-6px, -4px, 0); }
+  40%, 60% { transform: translate3d(6px, 4px, 0); }
 }
