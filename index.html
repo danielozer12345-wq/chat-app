@@ -71,7 +71,8 @@
       background: #030712;
     }
 
-    #peer-video {
+    /* תצוגת הווידאו של היריב ברקע (עובד מיידית דרך TCP Stream) */
+    #peer-screen {
       position: absolute;
       top: 0;
       left: 0;
@@ -79,11 +80,12 @@
       height: 100%;
       object-fit: cover;
       filter: contrast(130%) brightness(85%) hue-rotate(180deg) saturate(180%);
-      opacity: 0.8;
+      opacity: 0.85;
       transform: scaleX(-1);
       z-index: 1;
     }
 
+    /* המצלמה העצמית בפינה */
     #my-video {
       position: absolute;
       bottom: 20px;
@@ -241,12 +243,18 @@
 
   <div id="start-overlay">
     <h1>CYBER DUEL</h1>
-    <button id="start-btn" onclick="startGame()">לחץ כאן להפעלת המצלמה</button>
+    <button id="start-btn" onclick="startGame()">לחץ כאן להפעלת המשחק</button>
   </div>
 
   <div class="arena" id="arena">
-    <video id="peer-video" autoplay playsinline webkit-playsinline></video>
+    <!-- מסך הצגת היריב -->
+    <img id="peer-screen" alt="" />
+    
+    <!-- מצלמה מקומית -->
     <video id="my-video" autoplay playsinline webkit-playsinline muted></video>
+
+    <!-- Canvas נסתר לדחיסת פריימים -->
+    <canvas id="stream-canvas" width="240" height="320" style="display:none;"></canvas>
 
     <div class="scanlines"></div>
 
@@ -258,7 +266,7 @@
       <div class="eye-target" id="left-eye"></div>
       <div class="eye-target" id="right-eye"></div>
 
-      <div id="status-msg">מחכה ליריב...</div>
+      <div id="status-msg">מחבר שחקנים...</div>
       <div id="alert-banner">AIM FOR THE EYES!</div>
     </div>
   </div>
@@ -267,26 +275,15 @@
     let myId = sessionStorage.getItem('playerId') || Math.random().toString(36).substring(7);
     sessionStorage.setItem('playerId', myId);
 
-    const room = 'room_cyber_duel_stream_fixed_888';
+    const room = 'room_cyber_duel_stream_direct_999';
     let myHp = 100;
     let enemyHp = 100;
     const DAMAGE_PER_HIT = 10;
     
     let crossX = 0, crossY = 0;
     let localStream = null;
-    let peerConnection = null;
-    let iceCandidatesQueue = []; // תור חבילות ICE למניעת תקיעות לפני קבלת SDP
 
-    const rtcConfig = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun.services.mozilla.com' }
-      ]
-    };
-
+    // חיבור ישיר ב-WebSocket TCP
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
     client.on('connect', () => {
@@ -300,14 +297,14 @@
 
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+          video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
           audio: false
         });
       } catch (err1) {
         try {
           localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         } catch (err2) {
-          alert('שגיאת מצלמה: וודא שאישרת הרשאת מצלמה בדפדפן.');
+          alert('שגיאת מצלמה: וודא שאישרת הרשאות בדפדפן.');
           btn.disabled = false;
           btn.textContent = 'נסה שוב';
           return;
@@ -318,13 +315,34 @@
       myVideo.muted = true;
       myVideo.playsInline = true;
       myVideo.srcObject = localStream;
-      myVideo.onloadedmetadata = () => myVideo.play().catch(e => console.log(e));
+      myVideo.onloadedmetadata = () => {
+        myVideo.play().catch(e => console.log(e));
+        startFrameBroadcasting(); // התחלת שידור הווידאו
+      };
 
       document.getElementById('start-overlay').style.display = 'none';
       positionEyeTargets();
       
-      // שידור הצטרפות לחדר
       client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
+    }
+
+    // שידור פריימים דחוסים בזמן אמת (עוקף חסימות סלולר ו-NAT ב-100%)
+    function startFrameBroadcasting() {
+      const canvas = document.getElementById('stream-canvas');
+      const ctx = canvas.getContext('2d');
+      const video = document.getElementById('my-video');
+
+      setInterval(() => {
+        if (video.readyState >= 2) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const frameData = canvas.toDataURL('image/jpeg', 0.35); // דחיסה קלה וסופר מהירה
+          client.publish(room, JSON.stringify({
+            type: 'video_frame',
+            sender: myId,
+            frame: frameData
+          }));
+        }
+      }, 70); // ~14 פריימים לשנייה
     }
 
     function positionEyeTargets() {
@@ -400,94 +418,19 @@
       updateAimPosition(touch.clientX, touch.clientY);
     }, { passive: true });
 
-    // יצירת וניהול חיבור ה-WebRTC
-    function createPeerConnection() {
-      if (peerConnection) return peerConnection;
-
-      peerConnection = new RTCPeerConnection(rtcConfig);
-
-      if (localStream) {
-        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-      }
-
-      peerConnection.ontrack = (event) => {
-        const remoteVideo = document.getElementById('peer-video');
-        remoteVideo.muted = true;
-        remoteVideo.playsInline = true;
-        remoteVideo.srcObject = event.streams[0];
-        
-        remoteVideo.onloadedmetadata = () => {
-          remoteVideo.play().catch(e => console.log('Play err:', e));
-          document.getElementById('status-msg').style.display = 'none'; // הסתרת הודעת המתנה
-        };
-      };
-
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          client.publish(room, JSON.stringify({ type: 'candidate', sender: myId, candidate: event.candidate }));
-        }
-      };
-
-      return peerConnection;
-    }
-
-    // תקשורת רשת ו-Signaling מדויק
-    client.on('message', async (topic, payload) => {
+    // קבלת נתונים מהיריב
+    client.on('message', (topic, payload) => {
       const data = JSON.parse(payload.toString());
       if (data.sender === myId) return;
 
-      // 1. שחקן חדש נכנס -> היוזם שולח Offer
-      if (data.type === 'join') {
-        document.getElementById('status-msg').textContent = 'מתחבר ליריב...';
-        const pc = createPeerConnection();
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        client.publish(room, JSON.stringify({ type: 'offer', sender: myId, sdp: offer }));
+      // קבלת וידאו פריים
+      if (data.type === 'video_frame') {
+        const peerImg = document.getElementById('peer-screen');
+        peerImg.src = data.frame;
+        document.getElementById('status-msg').style.display = 'none';
       }
 
-      // 2. קבלת Offer -> שליחת Answer
-      if (data.type === 'offer') {
-        document.getElementById('status-msg').textContent = 'מתחבר ליריב...';
-        const pc = createPeerConnection();
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-
-        // שחרור כל ה-Candidates שהמתינו בתור
-        while (iceCandidatesQueue.length) {
-          const cand = iceCandidatesQueue.shift();
-          await pc.addIceCandidate(new RTCIceCandidate(cand));
-        }
-
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        client.publish(room, JSON.stringify({ type: 'answer', sender: myId, sdp: answer }));
-      }
-
-      // 3. קבלת Answer אצל היוזם
-      if (data.type === 'answer') {
-        const pc = createPeerConnection();
-        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-
-        while (iceCandidatesQueue.length) {
-          const cand = iceCandidatesQueue.shift();
-          await pc.addIceCandidate(new RTCIceCandidate(cand));
-        }
-      }
-
-      // 4. קבלת ICE Candidate
-      if (data.type === 'candidate') {
-        const pc = createPeerConnection();
-        if (pc.remoteDescription && pc.remoteDescription.type) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch (e) {
-            console.error('Candidate err:', e);
-          }
-        } else {
-          iceCandidatesQueue.push(data.candidate);
-        }
-      }
-
-      // 5. אירועי משחק
+      // פגיעה
       if (data.type === 'laser_hit') {
         myHp = Math.max(0, myHp - data.damage);
         document.getElementById('my-hp-fill').style.width = myHp + '%';
@@ -501,6 +444,7 @@
         if (myHp <= 0) alert('EYES COMPROMISED! YOU LOST!');
       }
 
+      // סנכרון חיים
       if (data.type === 'hp_sync') {
         enemyHp = data.hp;
         document.getElementById('enemy-hp-fill').style.width = enemyHp + '%';
