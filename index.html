@@ -4,53 +4,223 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Cyber Eye-Sniper Duel</title>
-  <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+
   <style>
-    /* מסך פתיחה שמאפשר הרשאת מצלמה בלחיצה */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      background: #030712;
+      touch-action: none;
+    }
+
+    /* מסך פתיחה עם עדיפות עליונה מוחלטת */
     #start-overlay {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      background: #030712;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 999999;
+      gap: 20px;
+      padding: 20px;
+    }
+
+    #start-overlay h1 {
+      color: #00f0ff;
+      font-size: 26px;
+      letter-spacing: 2px;
+      text-shadow: 0 0 15px #00f0ff;
+      text-align: center;
+    }
+
+    #start-btn {
+      padding: 16px 36px;
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      color: #030712;
+      background: #00f0ff;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 0 25px rgba(0, 240, 255, 0.8);
+      -webkit-appearance: none;
+    }
+
+    /* זירת המשחק */
+    .arena {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      background: #030712;
+    }
+
+    #peer-video {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
-      background: rgba(3, 7, 18, 0.95);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      gap: 15px;
+      object-fit: cover;
+      filter: contrast(130%) brightness(85%) hue-rotate(180deg) saturate(180%);
+      opacity: 0.7;
+      transform: scaleX(-1);
     }
-    #start-overlay h1 {
-      color: #00f0ff;
-      font-size: 22px;
-      text-shadow: 0 0 10px #00f0ff;
+
+    .scanlines {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      background: linear-gradient(to bottom, transparent 50%, rgba(0, 240, 255, 0.12) 51%);
+      background-size: 100% 4px;
+      z-index: 2;
     }
-    #start-btn {
-      padding: 14px 30px;
-      font-size: 18px;
-      font-weight: bold;
-      color: #030712;
-      background: #00f0ff;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      box-shadow: 0 0 20px #00f0ff;
+
+    .hud {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    #alert-banner {
+      position: absolute;
+      top: 20%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 20px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      text-align: center;
+      width: 90%;
+      color: #ff0055;
+      text-shadow: 0 0 15px #ff0055;
+      opacity: 0;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    #alert-banner.show {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1.05);
+    }
+
+    .hp-bar {
+      position: absolute;
+      width: 130px;
+      height: 14px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(0, 240, 255, 0.5);
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+      transform: skewX(-20deg);
+      overflow: hidden;
+      padding: 1px;
+    }
+
+    .enemy-hp { top: 15px; left: 15px; border-color: #ff0055; }
+    .my-hp { bottom: 20px; right: 15px; }
+
+    .hp-bar .fill {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, #00f0ff, #38bdf8);
+      transition: width 0.25s ease;
+    }
+
+    .enemy-hp .fill { background: linear-gradient(90deg, #ff0055, #ff5500); }
+
+    .target-crosshair {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 44px;
+      height: 44px;
+      transform: translate(-50%, -50%);
+      border: 2px solid #00f0ff;
+      border-radius: 50%;
+      box-shadow: 0 0 15px rgba(0, 240, 255, 0.8);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .target-crosshair::before,
+    .target-crosshair::after {
+      content: '';
+      position: absolute;
+      background: #ff0055;
+    }
+
+    .target-crosshair::before {
+      top: 50%; left: -5px; right: -5px; height: 2px; transform: translateY(-50%);
+    }
+
+    .target-crosshair::after {
+      left: 50%; top: -5px; bottom: -5px; width: 2px; transform: translateX(-50%);
+    }
+
+    .eye-target {
+      position: absolute;
+      width: 36px;
+      height: 36px;
+      transform: translate(-50%, -50%);
+      border: 2px dashed #ff0055;
+      border-radius: 50%;
+      box-shadow: 0 0 12px #ff0055;
+      pointer-events: none;
+      z-index: 4;
+      animation: spinEye 3s linear infinite;
+    }
+
+    @keyframes spinEye {
+      100% { transform: translate(-50%, -50%) rotate(360deg); }
+    }
+
+    .screen-hit {
+      animation: hitShake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+    }
+
+    @keyframes hitShake {
+      10%, 90% { transform: translate3d(-3px, -2px, 0); filter: brightness(2) drop-shadow(0 0 25px red); }
+      20%, 80% { transform: translate3d(5px, 3px, 0); }
+      30%, 50%, 70% { transform: translate3d(-6px, -4px, 0); }
+      40%, 60% { transform: translate3d(6px, 4px, 0); }
     }
   </style>
 </head>
 <body>
 
-  <!-- מסך אישור מצלמה למובייל -->
+  <!-- מסך הפתיחה עם כפתור ברור למובייל -->
   <div id="start-overlay">
     <h1>CYBER DUEL</h1>
     <button id="start-btn" onclick="startGame()">הפעל מצלמה והתחל</button>
   </div>
 
   <div class="arena" id="arena">
-    <!-- video עם כל המאפיינים הנדרשים למובייל -->
     <video id="peer-video" autoplay playsinline muted></video>
     <div class="scanlines"></div>
 
@@ -81,39 +251,45 @@
 
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
-    // פונקציית התחלה שמופעלת מלחיצת המשתמש
-    async function startGame() {
-      document.getElementById('start-overlay').style.display = 'none';
-      await initCamera();
-      await loadFaceAI();
-      client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
-    }
-
     client.on('connect', () => {
       client.subscribe(room);
     });
 
-    // פתיחת מצלמה קדמית עם fallback
+    async function startGame() {
+      const btn = document.getElementById('start-btn');
+      btn.textContent = 'טוען מצלמה ומודל...';
+      btn.disabled = true;
+
+      await initCamera();
+      await loadFaceAI();
+
+      document.getElementById('start-overlay').style.display = 'none';
+      client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
+    }
+
     async function initCamera() {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
-          audio: false // ביטול אודיו למניעת שגיאות הרשאה במובייל
+          audio: false
         });
       } catch (e) {
         try {
-          // ניסיון שני למצלמה כללית
           localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         } catch (err) {
-          alert('אנא אשר הרשאת מצלמה בדפדפן (וודא שאתה פותח ב-Safari או Chrome ולא בתוך וואטסאפ)');
+          alert('חובה לאשר הרשאת מצלמה בדפדפן (וודא פתיחה ב-Chrome או Safari ישירות)');
         }
       }
     }
 
     async function loadFaceAI() {
-      await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
-      await faceapi.nets.faceLandmark68TinyNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
-      startEyeTrackingLoop();
+      try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
+        await faceapi.nets.faceLandmark68TinyNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
+        startEyeTrackingLoop();
+      } catch (e) {
+        console.warn('AI loading issue:', e);
+      }
     }
 
     function startEyeTrackingLoop() {
