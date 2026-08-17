@@ -251,7 +251,7 @@
     let myId = sessionStorage.getItem('playerId') || Math.random().toString(36).substring(7);
     sessionStorage.setItem('playerId', myId);
 
-    const room = 'room_cyber_duel_v4_mobile';
+    const room = 'room_cyber_duel_v5_mobile_fixed';
     let myHp = 100;
     let enemyHp = 100;
     const DAMAGE_PER_HIT = 10;
@@ -259,7 +259,6 @@
     let crossX = 0, crossY = 0;
     let localStream, peerConnection;
 
-    // שרתי STUN מרובים לסנכרון בין Wi-Fi לסלולר
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -289,22 +288,22 @@
         try {
           localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         } catch (err2) {
-          alert('שגיאת מצלמה: ' + err2.name + ' - ' + err2.message + '\nוודא שאישרת הרשאת מצלמה ופתחת בדפדפן ולא בוואטסאפ.');
+          alert('שגיאת הרשאת מצלמה: ' + err2.name + '\nוודא שהרשאת המצלמה מוגדרת על "אפשר" בהגדרות הדפדפן.');
           btn.disabled = false;
           btn.textContent = 'נסה שוב';
           return;
         }
       }
 
+      // טיפול ספציפי למובייל: חיבור ישיר והשתקה בקוד לפני הפעלה
       const myVideo = document.getElementById('my-video');
+      myVideo.muted = true;
+      myVideo.playsInline = true;
       myVideo.srcObject = localStream;
-      
-      // הבטחת ניגון וידאו במובייל
-      try {
-        await myVideo.play();
-      } catch (e) {
-        console.log('My video play issue:', e);
-      }
+
+      myVideo.onloadedmetadata = () => {
+        myVideo.play().catch(e => console.log('My video play err:', e));
+      };
 
       document.getElementById('start-overlay').style.display = 'none';
       positionEyeTargets();
@@ -447,9 +446,14 @@
 
       peerConnection.ontrack = e => {
         const remoteVideo = document.getElementById('peer-video');
+        remoteVideo.muted = true;
+        remoteVideo.playsInline = true;
+        
         if (remoteVideo.srcObject !== e.streams[0]) {
           remoteVideo.srcObject = e.streams[0];
-          remoteVideo.play().catch(err => console.log('Remote play err:', err));
+          remoteVideo.onloadedmetadata = () => {
+            remoteVideo.play().catch(err => console.log('Remote play err:', err));
+          };
         }
       };
 
