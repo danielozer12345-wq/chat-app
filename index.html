@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Cyber Sniper Duel</title>
+  
+  <!-- ספריות חיבור ווידאו ישיר ותקשורת קרב -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
   <style>
@@ -71,8 +74,8 @@
       background: #030712;
     }
 
-    /* תצוגת הווידאו של היריב ברקע (עובד מיידית דרך TCP Stream) */
-    #peer-screen {
+    /* וידאו היריב במסך המלא */
+    #peer-video {
       position: absolute;
       top: 0;
       left: 0;
@@ -134,6 +137,7 @@
       text-shadow: 0 0 10px #00f0ff;
       text-align: center;
       width: 90%;
+      z-index: 6;
     }
 
     #alert-banner {
@@ -247,14 +251,8 @@
   </div>
 
   <div class="arena" id="arena">
-    <!-- מסך הצגת היריב -->
-    <img id="peer-screen" alt="" />
-    
-    <!-- מצלמה מקומית -->
+    <video id="peer-video" autoplay playsinline webkit-playsinline></video>
     <video id="my-video" autoplay playsinline webkit-playsinline muted></video>
-
-    <!-- Canvas נסתר לדחיסת פריימים -->
-    <canvas id="stream-canvas" width="240" height="320" style="display:none;"></canvas>
 
     <div class="scanlines"></div>
 
@@ -266,7 +264,7 @@
       <div class="eye-target" id="left-eye"></div>
       <div class="eye-target" id="right-eye"></div>
 
-      <div id="status-msg">מחבר שחקנים...</div>
+      <div id="status-msg">מחבר מצלמות...</div>
       <div id="alert-banner">AIM FOR THE EYES!</div>
     </div>
   </div>
@@ -275,15 +273,18 @@
     let myId = sessionStorage.getItem('playerId') || Math.random().toString(36).substring(7);
     sessionStorage.setItem('playerId', myId);
 
-    const room = 'room_cyber_duel_stream_direct_999';
+    const room = 'room_cyber_duel_peerjs_final_111';
     let myHp = 100;
     let enemyHp = 100;
     const DAMAGE_PER_HIT = 10;
     
     let crossX = 0, crossY = 0;
     let localStream = null;
+    let peer = null;
+    let myPeerId = null;
+    let currentCall = null;
 
-    // חיבור ישיר ב-WebSocket TCP
+    // ערוץ רשת עבור אירועי משחק בלבד
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
     client.on('connect', () => {
@@ -297,7 +298,7 @@
 
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } },
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
         });
       } catch (err1) {
@@ -311,38 +312,50 @@
         }
       }
 
+      // תצוגת מצלמה מקומית
       const myVideo = document.getElementById('my-video');
       myVideo.muted = true;
       myVideo.playsInline = true;
       myVideo.srcObject = localStream;
-      myVideo.onloadedmetadata = () => {
-        myVideo.play().catch(e => console.log(e));
-        startFrameBroadcasting(); // התחלת שידור הווידאו
-      };
+      myVideo.onloadedmetadata = () => myVideo.play().catch(e => console.log(e));
 
       document.getElementById('start-overlay').style.display = 'none';
       positionEyeTargets();
-      
-      client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
+
+      // הפעלת שרת ה-PeerJS לווידאו
+      initPeerJS();
     }
 
-    // שידור פריימים דחוסים בזמן אמת (עוקף חסימות סלולר ו-NAT ב-100%)
-    function startFrameBroadcasting() {
-      const canvas = document.getElementById('stream-canvas');
-      const ctx = canvas.getContext('2d');
-      const video = document.getElementById('my-video');
+    function initPeerJS() {
+      peer = new Peer();
 
-      setInterval(() => {
-        if (video.readyState >= 2) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const frameData = canvas.toDataURL('image/jpeg', 0.35); // דחיסה קלה וסופר מהירה
-          client.publish(room, JSON.stringify({
-            type: 'video_frame',
-            sender: myId,
-            frame: frameData
-          }));
-        }
-      }, 70); // ~14 פריימים לשנייה
+      peer.on('open', (id) => {
+        myPeerId = id;
+        document.getElementById('status-msg').textContent = 'מחכה ליריב...';
+        // שידור ה-Peer ID של השחקן לחדר
+        client.publish(room, JSON.stringify({ type: 'ready', sender: myId, peerId: myPeerId }));
+      });
+
+      // מענה לשיחת וידאו מהיריב
+      peer.on('call', (call) => {
+        currentCall = call;
+        call.answer(localStream);
+        handleStream(call);
+      });
+    }
+
+    // חיבור הזרם של היריב למסך
+    function handleStream(call) {
+      call.on('stream', (remoteStream) => {
+        const peerVideo = document.getElementById('peer-video');
+        peerVideo.muted = true;
+        peerVideo.playsInline = true;
+        peerVideo.srcObject = remoteStream;
+        peerVideo.onloadedmetadata = () => {
+          peerVideo.play().catch(e => console.log(e));
+          document.getElementById('status-msg').style.display = 'none';
+        };
+      });
     }
 
     function positionEyeTargets() {
@@ -418,19 +431,20 @@
       updateAimPosition(touch.clientX, touch.clientY);
     }, { passive: true });
 
-    // קבלת נתונים מהיריב
+    // קבלת אירועים דרך MQTT
     client.on('message', (topic, payload) => {
       const data = JSON.parse(payload.toString());
       if (data.sender === myId) return;
 
-      // קבלת וידאו פריים
-      if (data.type === 'video_frame') {
-        const peerImg = document.getElementById('peer-screen');
-        peerImg.src = data.frame;
-        document.getElementById('status-msg').style.display = 'none';
+      // כשהשחקן השני מוכן -> מחייגים אליו עם ה-Stream המקומי
+      if (data.type === 'ready' && peer && localStream) {
+        document.getElementById('status-msg').textContent = 'מתחבר לווידאו...';
+        const call = peer.call(data.peerId, localStream);
+        currentCall = call;
+        handleStream(call);
       }
 
-      // פגיעה
+      // נזק ופגיעות
       if (data.type === 'laser_hit') {
         myHp = Math.max(0, myHp - data.damage);
         document.getElementById('my-hp-fill').style.width = myHp + '%';
@@ -444,7 +458,6 @@
         if (myHp <= 0) alert('EYES COMPROMISED! YOU LOST!');
       }
 
-      // סנכרון חיים
       if (data.type === 'hp_sync') {
         enemyHp = data.hp;
         document.getElementById('enemy-hp-fill').style.width = enemyHp + '%';
