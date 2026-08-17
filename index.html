@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Cyber Eye-Sniper Duel</title>
+  <title>Cyber Sniper Duel</title>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
 
   <style>
     * {
@@ -26,7 +25,7 @@
       touch-action: none;
     }
 
-    /* מסך פתיחה עם עדיפות עליונה מוחלטת */
+    /* מסך התחלה */
     #start-overlay {
       position: fixed;
       inset: 0;
@@ -45,8 +44,8 @@
 
     #start-overlay h1 {
       color: #00f0ff;
-      font-size: 26px;
-      letter-spacing: 2px;
+      font-size: 28px;
+      letter-spacing: 3px;
       text-shadow: 0 0 15px #00f0ff;
       text-align: center;
     }
@@ -55,14 +54,12 @@
       padding: 16px 36px;
       font-size: 18px;
       font-weight: 900;
-      letter-spacing: 1px;
       color: #030712;
       background: #00f0ff;
       border: none;
       border-radius: 12px;
       cursor: pointer;
       box-shadow: 0 0 25px rgba(0, 240, 255, 0.8);
-      -webkit-appearance: none;
     }
 
     /* זירת המשחק */
@@ -75,6 +72,7 @@
       background: #030712;
     }
 
+    /* וידאו היריב במסך מלא */
     #peer-video {
       position: absolute;
       top: 0;
@@ -83,7 +81,22 @@
       height: 100%;
       object-fit: cover;
       filter: contrast(130%) brightness(85%) hue-rotate(180deg) saturate(180%);
-      opacity: 0.7;
+      opacity: 0.75;
+      transform: scaleX(-1);
+    }
+
+    /* תצוגת מצלמה עצמית קטנה בפינה */
+    #my-video {
+      position: absolute;
+      bottom: 20px;
+      left: 15px;
+      width: 90px;
+      height: 120px;
+      object-fit: cover;
+      border: 2px solid #00f0ff;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.4);
+      z-index: 10;
       transform: scaleX(-1);
     }
 
@@ -111,7 +124,7 @@
 
     #alert-banner {
       position: absolute;
-      top: 20%;
+      top: 18%;
       left: 50%;
       transform: translate(-50%, -50%);
       font-size: 20px;
@@ -143,7 +156,7 @@
     }
 
     .enemy-hp { top: 15px; left: 15px; border-color: #ff0055; }
-    .my-hp { bottom: 20px; right: 15px; }
+    .my-hp { top: 15px; right: 15px; }
 
     .hp-bar .fill {
       width: 100%;
@@ -154,6 +167,7 @@
 
     .enemy-hp .fill { background: linear-gradient(90deg, #ff0055, #ff5500); }
 
+    /* כוונת עכבר / טאץ' */
     .target-crosshair {
       position: absolute;
       top: 0;
@@ -183,14 +197,15 @@
       left: 50%; top: -5px; bottom: -5px; width: 2px; transform: translateX(-50%);
     }
 
+    /* כוונות נעילה על אזור העיניים/פנים */
     .eye-target {
       position: absolute;
-      width: 36px;
-      height: 36px;
+      width: 42px;
+      height: 42px;
       transform: translate(-50%, -50%);
       border: 2px dashed #ff0055;
       border-radius: 50%;
-      box-shadow: 0 0 12px #ff0055;
+      box-shadow: 0 0 15px #ff0055;
       pointer-events: none;
       z-index: 4;
       animation: spinEye 3s linear infinite;
@@ -214,14 +229,19 @@
 </head>
 <body>
 
-  <!-- מסך הפתיחה עם כפתור ברור למובייל -->
+  <!-- מסך אישור מצלמה מיידי -->
   <div id="start-overlay">
     <h1>CYBER DUEL</h1>
-    <button id="start-btn" onclick="startGame()">הפעל מצלמה והתחל</button>
+    <button id="start-btn" onclick="startGame()">לחץ כאן להפעלת המצלמה</button>
   </div>
 
   <div class="arena" id="arena">
+    <!-- וידאו היריב -->
     <video id="peer-video" autoplay playsinline muted></video>
+    
+    <!-- המצלמה שלי לבדיקה עצמית בפינה -->
+    <video id="my-video" autoplay playsinline muted></video>
+
     <div class="scanlines"></div>
 
     <div class="hud">
@@ -229,8 +249,8 @@
       <div class="hp-bar my-hp"><div class="fill" id="my-hp-fill"></div></div>
       
       <div class="target-crosshair" id="crosshair" style="display:none;"></div>
-      <div class="eye-target" id="left-eye" style="display:none;"></div>
-      <div class="eye-target" id="right-eye" style="display:none;"></div>
+      <div class="eye-target" id="left-eye"></div>
+      <div class="eye-target" id="right-eye"></div>
 
       <div id="alert-banner">AIM FOR THE EYES!</div>
     </div>
@@ -240,96 +260,74 @@
     let myId = sessionStorage.getItem('playerId') || Math.random().toString(36).substring(7);
     sessionStorage.setItem('playerId', myId);
 
-    const room = 'room_cyber_sniper_duel_2026';
+    const room = 'room_cyber_duel_v3_direct';
     let myHp = 100;
     let enemyHp = 100;
     const DAMAGE_PER_HIT = 10;
     
     let crossX = 0, crossY = 0;
-    let detectedEyes = [];
     let localStream, peerConnection;
 
+    // ערוץ רשת
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
     client.on('connect', () => {
       client.subscribe(room);
     });
 
+    // 1. התחלת המשחק והפעלת המצלמה
     async function startGame() {
       const btn = document.getElementById('start-btn');
-      btn.textContent = 'טוען מצלמה ומודל...';
-      btn.disabled = true;
+      btn.textContent = 'מפעיל מצלמה...';
 
-      await initCamera();
-      await loadFaceAI();
-
-      document.getElementById('start-overlay').style.display = 'none';
-      client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
-    }
-
-    async function initCamera() {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
+          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false
         });
       } catch (e) {
+        // ניסיון מצלמה ברירת מחדל
         try {
           localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         } catch (err) {
-          alert('חובה לאשר הרשאת מצלמה בדפדפן (וודא פתיחה ב-Chrome או Safari ישירות)');
+          alert('שגיאת הרשאת מצלמה. וודא שאישרת גישה למצלמה בדפדפן.');
+          return;
         }
       }
+
+      // הצגת המצלמה העצמית
+      const myVideo = document.getElementById('my-video');
+      myVideo.srcObject = localStream;
+      myVideo.play();
+
+      document.getElementById('start-overlay').style.display = 'none';
+      positionEyeTargets();
+      
+      // שידור חיבור ליריב
+      client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
     }
 
-    async function loadFaceAI() {
-      try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
-        await faceapi.nets.faceLandmark68TinyNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
-        startEyeTrackingLoop();
-      } catch (e) {
-        console.warn('AI loading issue:', e);
-      }
-    }
+    // 2. מיקום כוונות העיניים ביחס למרכז המסך (עובד מיידית ללא תלות בקבצי AI חיצוניים)
+    function positionEyeTargets() {
+      const arena = document.getElementById('arena');
+      const rect = arena.getBoundingClientRect();
+      
+      const centerX = rect.width / 2;
+      const centerY = rect.height * 0.42; // גובה עיניים ממוצע בפריים
 
-    function startEyeTrackingLoop() {
-      const video = document.getElementById('peer-video');
       const leftEyeEl = document.getElementById('left-eye');
       const rightEyeEl = document.getElementById('right-eye');
-      const arena = document.getElementById('arena');
 
-      setInterval(async () => {
-        if (video.readyState >= 2) {
-          const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 160 })).withFaceLandmarks(true);
-          if (detection) {
-            const landmarks = detection.landmarks;
-            const leftEyePts = landmarks.getLeftEye();
-            const rightEyePts = landmarks.getRightEye();
+      leftEyeEl.style.left = (centerX - 45) + 'px';
+      leftEyeEl.style.top = centerY + 'px';
 
-            const rect = arena.getBoundingClientRect();
-            const scaleX = rect.width / video.videoWidth;
-            const scaleY = rect.height / video.videoHeight;
-
-            const lX = rect.width - (leftEyePts[0].x * scaleX);
-            const lY = leftEyePts[0].y * scaleY;
-            const rX = rect.width - (rightEyePts[0].x * scaleX);
-            const rY = rightEyePts[0].y * scaleY;
-
-            detectedEyes = [
-              { x: lX, y: lY, radius: 36 },
-              { x: rX, y: rY, radius: 36 }
-            ];
-
-            leftEyeEl.style.display = rightEyeEl.style.display = 'block';
-            leftEyeEl.style.left = lX + 'px';
-            leftEyeEl.style.top = lY + 'px';
-            rightEyeEl.style.left = rX + 'px';
-            rightEyeEl.style.top = rY + 'px';
-          }
-        }
-      }, 100);
+      rightEyeEl.style.left = (centerX + 45) + 'px';
+      rightEyeEl.style.top = centerY + 'px';
     }
 
+    window.addEventListener('resize', positionEyeTargets);
+
+    // 3. תנועת כוונת
     function updateAimPosition(clientX, clientY) {
       const rect = document.getElementById('arena').getBoundingClientRect();
       crossX = clientX - rect.left;
@@ -340,20 +338,23 @@
       crosshair.style.top = crossY + 'px';
     }
 
+    // 4. ירייה ובדיקת פגיעה בעין
     function fireAction() {
       if (myHp <= 0 || enemyHp <= 0) return;
 
-      let hitEye = false;
-      for (let eye of detectedEyes) {
-        const dist = Math.hypot(crossX - eye.x, crossY - eye.y);
-        if (dist <= eye.radius) {
-          hitEye = true;
-          break;
-        }
-      }
+      const arena = document.getElementById('arena');
+      const rect = arena.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height * 0.42;
+
+      const eyeLeft = { x: centerX - 45, y: centerY, r: 35 };
+      const eyeRight = { x: centerX + 45, y: centerY, r: 35 };
+
+      const hitLeft = Math.hypot(crossX - eyeLeft.x, crossY - eyeLeft.y) <= eyeLeft.r;
+      const hitRight = Math.hypot(crossX - eyeRight.x, crossY - eyeRight.y) <= eyeRight.r;
 
       const banner = document.getElementById('alert-banner');
-      if (hitEye) {
+      if (hitLeft || hitRight) {
         banner.textContent = 'EYE HIT! -10HP';
         banner.style.color = '#00f0ff';
         banner.classList.add('show');
@@ -361,7 +362,7 @@
 
         client.publish(room, JSON.stringify({ type: 'laser_hit', sender: myId, damage: DAMAGE_PER_HIT }));
       } else {
-        banner.textContent = 'MISSED! TARGET THE EYES!';
+        banner.textContent = 'MISSED! AIM FOR THE EYE TARGETS!';
         banner.style.color = '#ff0055';
         banner.classList.add('show');
         setTimeout(() => banner.classList.remove('show'), 500);
@@ -383,6 +384,7 @@
       updateAimPosition(touch.clientX, touch.clientY);
     }, { passive: true });
 
+    // 5. תקשורת רשת ושידור הווידאו
     client.on('message', async (topic, payload) => {
       const data = JSON.parse(payload.toString());
       if (data.sender === myId) return;
@@ -391,7 +393,9 @@
         client.publish(room, JSON.stringify({ type: 'welcome', sender: myId, target: data.sender }));
         startWebRTC(true);
       }
-      if (data.type === 'welcome' && data.target === myId) startWebRTC(false);
+      if (data.type === 'welcome' && data.target === myId) {
+        startWebRTC(false);
+      }
 
       if (data.type === 'signal') {
         if (data.sdp) {
@@ -428,16 +432,21 @@
 
     function startWebRTC(isOffer) {
       peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-      if (localStream) localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+      
+      if (localStream) {
+        localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
+      }
 
       peerConnection.ontrack = e => {
         const remoteVideo = document.getElementById('peer-video');
         remoteVideo.srcObject = e.streams[0];
-        remoteVideo.play().catch(err => console.log('Autoplay play error:', err));
+        remoteVideo.play().catch(err => console.log(err));
       };
+
       peerConnection.onicecandidate = e => {
         if (e.candidate) client.publish(room, JSON.stringify({ type: 'signal', sender: myId, candidate: e.candidate }));
       };
+
       if (isOffer) {
         peerConnection.createOffer().then(o => {
           peerConnection.setLocalDescription(o);
