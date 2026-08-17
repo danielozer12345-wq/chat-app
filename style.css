@@ -2,176 +2,171 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  user-select: none;
+  font-family: 'Courier New', Courier, monospace;
 }
 
-/* רקע גרדיאנט חי ונע */
 body {
-  min-height: 100vh;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #030712;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(-45deg, #0f172a, #1e1b4b, #0284c7, #0f172a);
-  background-size: 400% 400%;
-  animation: gradientShift 15s ease infinite;
-  padding: 20px;
 }
 
-@keyframes gradientShift {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-/* כרטיס זכוכית יוקרתי (Glassmorphism) */
-.card {
+/* זירת המשחק */
+.arena {
   position: relative;
+  width: 100vw;
+  height: 100vh;
+  max-width: 1200px;
+  max-height: 800px;
+  overflow: hidden;
+  border: 2px solid rgba(0, 240, 255, 0.3);
+  box-shadow: inset 0 0 50px rgba(0, 240, 255, 0.2), 0 0 30px rgba(0, 240, 255, 0.2);
+  background: #030712;
+  cursor: crosshair;
+}
+
+/* וידאו היריב (UDP) עם אפקט הולוגרמה */
+#peer-video {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
-  max-width: 380px;
-  background: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 24px;
-  padding: 32px 28px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6),
-              0 0 30px rgba(56, 189, 248, 0.15);
-  animation: floatIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  height: 100%;
+  object-fit: cover;
+  filter: contrast(130%) brightness(85%) hue-rotate(180deg) saturate(180%);
+  opacity: 0.7;
+  transform: scaleX(-1);
 }
 
-@keyframes floatIn {
-  from { opacity: 0; transform: translateY(30px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+.scanlines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent 50%, rgba(0, 240, 255, 0.12) 51%);
+  background-size: 100% 4px;
+  z-index: 2;
 }
 
-h2 {
+/* ממשק HUD */
+.hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* התרעת פגיעה / החטאה */
+#alert-banner {
+  position: absolute;
+  top: 25%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   font-size: 24px;
-  font-weight: 800;
-  text-align: center;
-  background: linear-gradient(135deg, #ffffff, #94a3b8);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin-bottom: 8px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #ff0055;
+  text-shadow: 0 0 15px #ff0055;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
-/* מונה משתתפים עם נקודת Pulse חיה */
-.status-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #94a3b8;
-  margin-bottom: 26px;
+#alert-banner.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.1);
 }
 
-.pulse-dot {
-  width: 8px;
-  height: 8px;
-  background: #10b981;
+/* מדי חיים */
+.hp-bar {
+  position: absolute;
+  width: 260px;
+  height: 16px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(0, 240, 255, 0.5);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+  transform: skewX(-20deg);
+  overflow: hidden;
+  padding: 2px;
+}
+
+.enemy-hp { top: 25px; left: 30px; border-color: #ff0055; }
+.my-hp { bottom: 30px; right: 30px; }
+
+.hp-bar .fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #00f0ff, #38bdf8);
+  transition: width 0.25s ease;
+}
+
+.enemy-hp .fill { background: linear-gradient(90deg, #ff0055, #ff5500); }
+
+/* כוונת עכבר דינמית עוקבת */
+.target-crosshair {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50px;
+  height: 50px;
+  transform: translate(-50%, -50%);
+  border: 2px solid #00f0ff;
   border-radius: 50%;
-  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-  animation: pulse 2s infinite;
+  box-shadow: 0 0 15px rgba(0, 240, 255, 0.8);
+  pointer-events: none;
+  z-index: 10;
 }
 
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-  70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+.target-crosshair::before,
+.target-crosshair::after {
+  content: '';
+  position: absolute;
+  background: #ff0055;
 }
 
-strong {
-  color: #38bdf8;
-  font-weight: 700;
+.target-crosshair::before {
+  top: 50%; left: -6px; right: -6px; height: 2px; transform: translateY(-50%);
 }
 
-/* שורת קלט מעוצבת */
-.input-group {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 22px;
+.target-crosshair::after {
+  left: 50%; top: -6px; bottom: -6px; width: 2px; transform: translateX(-50%);
 }
 
-input {
-  flex: 1;
-  padding: 14px 16px;
-  font-size: 15px;
-  background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  color: #ffffff;
-  outline: none;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* נקודות נעילה על עיני היריב */
+.eye-target {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  border: 2px dashed #ff0055;
+  border-radius: 50%;
+  box-shadow: 0 0 12px #ff0055;
+  pointer-events: none;
+  z-index: 4;
+  animation: spinEye 3s linear infinite;
 }
 
-input::placeholder {
-  color: #64748b;
+@keyframes spinEye {
+  100% { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
-input:focus {
-  border-color: #38bdf8;
-  background: rgba(30, 41, 59, 0.9);
-  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.2);
+/* רעידת מסך בפגיעה */
+.screen-hit {
+  animation: hitShake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
 
-input:disabled {
-  background: rgba(15, 23, 42, 0.4);
-  color: #475569;
-  cursor: not-allowed;
-}
-
-/* כפתור שליחה עם זוהר בריחוף */
-button {
-  padding: 14px 22px;
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  background: linear-gradient(135deg, #0284c7, #2563eb);
-  color: #ffffff;
-  border: none;
-  border-radius: 14px;
-  box-shadow: 0 4px 15px rgba(2, 132, 199, 0.4);
-  transition: all 0.25s ease;
-}
-
-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(2, 132, 199, 0.6);
-}
-
-button:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-button:disabled {
-  background: #334155;
-  color: #64748b;
-  box-shadow: none;
-  cursor: not-allowed;
-}
-
-/* אזור הצגת ההודעות עם אפקט הקפצה וזוהר */
-#msg-box {
-  min-height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: rgba(15, 23, 42, 0.5);
-  border: 1px dashed rgba(255, 255, 255, 0.15);
-  border-radius: 16px;
-  text-align: center;
-  font-size: 19px;
-  font-weight: 700;
-  color: #64748b;
-  word-break: break-word;
-}
-
-.msg-pop {
-  animation: popIn 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-}
-
-@keyframes popIn {
-  0% { transform: scale(0.7) translateY(10px); opacity: 0; }
-  100% { transform: scale(1) translateY(0); opacity: 1; }
+@keyframes hitShake {
+  10%, 90% { transform: translate3d(-4px, -2px, 0); filter: brightness(2) drop-shadow(0 0 30px red); }
+  20%, 80% { transform: translate3d(6px, 4px, 0); }
+  30%, 50%, 70% { transform: translate3d(-8px, -6px, 0); }
+  40%, 60% { transform: translate3d(8px, 6px, 0); }
 }

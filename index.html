@@ -3,73 +3,208 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chat</title>
+  <title>Cyber Eye-Sniper Duel</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
 </head>
 <body>
 
-  <main class="card">
-    <h2>חדר שיחה</h2>
-    <div class="status-badge">
-      <span class="pulse-dot"></span>
-      <span>מחוברים: <strong id="count">1</strong></span>
-    </div>
-    
-    <div class="input-group">
-      <input id="text-input" placeholder="מחכה למשתתף נוסף..." disabled onkeydown="if(event.key==='Enter')send()">
-      <button id="send-btn" onclick="send()" disabled>שלח</button>
-    </div>
+  <!-- זירת המשחק: אירועי עכבר להזזת כוונת וירייה -->
+  <div class="arena" id="arena" onmousemove="moveAim(event)" onclick="fireLaser(event)">
+    <video id="peer-video" autoplay playsinline></video>
+    <div class="scanlines"></div>
 
-    <div id="msg-box">ממתין להודעות...</div>
-  </main>
+    <div class="hud">
+      <div class="hp-bar enemy-hp"><div class="fill" id="enemy-hp-fill"></div></div>
+      <div class="hp-bar my-hp"><div class="fill" id="my-hp-fill"></div></div>
+      
+      <div class="target-crosshair" id="crosshair"></div>
+      <div class="eye-target" id="left-eye" style="display:none;"></div>
+      <div class="eye-target" id="right-eye" style="display:none;"></div>
+
+      <div id="alert-banner">AIM FOR THE EYES!</div>
+    </div>
+  </div>
 
   <script>
-    let myId = sessionStorage.getItem('userId') || Math.random().toString(36).substring(7);
-    let myColor = sessionStorage.getItem('userColor') || ['#38bdf8','#4ade80','#f472b6','#fbbf24','#a78bfa','#f87171'][Math.floor(Math.random()*6)];
-    sessionStorage.setItem('userId', myId);
-    sessionStorage.setItem('userColor', myColor);
+    // 1. הגדרות זהות שחקן וחיבור
+    let myId = sessionStorage.getItem('playerId') || Math.random().toString(36).substring(7);
+    sessionStorage.setItem('playerId', myId);
 
-    const users = new Set([myId]);
-    const room = 'room_daniel_chat_free_text_777';
+    const room = 'room_cyber_sniper_duel_2026';
+    
+    let myHp = 100;
+    let enemyHp = 100;
+    const DAMAGE_PER_HIT = 10;
+    
+    let crossX = 0, crossY = 0;
+    let detectedEyes = [];
+
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    let localStream, peerConnection;
 
-    client.on('connect', () => {
+    // 2. אתחול
+    client.on('connect', async () => {
       client.subscribe(room);
-      client.publish(room, JSON.stringify({ type: 'ping', sender: myId }));
+      await initCamera();
+      await loadFaceAI();
+      client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
     });
 
-    client.on('message', (t, p) => {
-      const d = JSON.parse(p.toString());
-      if (d.type === 'ping') { users.add(d.sender); client.publish(room, JSON.stringify({ type: 'pong', sender: myId })); update(); }
-      if (d.type === 'pong') { users.add(d.sender); update(); }
-      if (d.type === 'bye') { users.delete(d.sender); update(); }
-      if (d.type === 'msg' && d.sender !== myId) {
-        const box = document.getElementById('msg-box');
-        box.textContent = d.text;
-        box.style.color = box.style.borderColor = d.color;
-        box.classList.remove('msg-pop');
-        void box.offsetWidth;
-        box.classList.add('msg-pop');
+    async function initCamera() {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: true });
+      } catch (e) { console.warn('No cam', e); }
+    }
+
+    async function loadFaceAI() {
+      await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
+      await faceapi.nets.faceLandmark68TinyNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
+      startEyeTrackingLoop();
+    }
+
+    // 3. מעקב עיניים בווידאו
+    function startEyeTrackingLoop() {
+      const video = document.getElementById('peer-video');
+      const leftEyeEl = document.getElementById('left-eye');
+      const rightEyeEl = document.getElementById('right-eye');
+      const arena = document.getElementById('arena');
+
+      setInterval(async () => {
+        if (video.readyState >= 2) {
+          const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true);
+          if (detection) {
+            const landmarks = detection.landmarks;
+            const leftEyePts = landmarks.getLeftEye();
+            const rightEyePts = landmarks.getRightEye();
+
+            const rect = arena.getBoundingClientRect();
+            const scaleX = rect.width / video.videoWidth;
+            const scaleY = rect.height / video.videoHeight;
+
+            const lX = rect.width - (leftEyePts[0].x * scaleX);
+            const lY = leftEyePts[0].y * scaleY;
+            const rX = rect.width - (rightEyePts[0].x * scaleX);
+            const rY = rightEyePts[0].y * scaleY;
+
+            detectedEyes = [
+              { x: lX, y: lY, radius: 28 },
+              { x: rX, y: rY, radius: 28 }
+            ];
+
+            leftEyeEl.style.display = rightEyeEl.style.display = 'block';
+            leftEyeEl.style.left = lX + 'px';
+            leftEyeEl.style.top = lY + 'px';
+            rightEyeEl.style.left = rX + 'px';
+            rightEyeEl.style.top = rY + 'px';
+          }
+        }
+      }, 80);
+    }
+
+    // 4. תנועת כוונת עם העכבר
+    function moveAim(e) {
+      const rect = document.getElementById('arena').getBoundingClientRect();
+      crossX = e.clientX - rect.left;
+      crossY = e.clientY - rect.top;
+      const crosshair = document.getElementById('crosshair');
+      crosshair.style.left = crossX + 'px';
+      crosshair.style.top = crossY + 'px';
+    }
+
+    // 5. ירי בלחיצת עכבר
+    function fireLaser(e) {
+      if (myHp <= 0 || enemyHp <= 0) return;
+
+      let hitEye = false;
+      for (let eye of detectedEyes) {
+        const dist = Math.hypot(crossX - eye.x, crossY - eye.y);
+        if (dist <= eye.radius) {
+          hitEye = true;
+          break;
+        }
+      }
+
+      const banner = document.getElementById('alert-banner');
+      if (hitEye) {
+        banner.textContent = 'EYE HIT! -10HP';
+        banner.style.color = '#00f0ff';
+        banner.classList.add('show');
+        setTimeout(() => banner.classList.remove('show'), 600);
+
+        // שידור פגיעה ישירה ליריב
+        client.publish(room, JSON.stringify({ type: 'laser_hit', sender: myId, damage: DAMAGE_PER_HIT }));
+      } else {
+        banner.textContent = 'MISSED! TARGET THE EYES!';
+        banner.style.color = '#ff0055';
+        banner.classList.add('show');
+        setTimeout(() => banner.classList.remove('show'), 500);
+      }
+    }
+
+    // 6. קבלת הודעות רשת
+    client.on('message', async (topic, payload) => {
+      const data = JSON.parse(payload.toString());
+      if (data.sender === myId) return;
+
+      if (data.type === 'join') {
+        client.publish(room, JSON.stringify({ type: 'welcome', sender: myId, target: data.sender }));
+        startWebRTC(true);
+      }
+      if (data.type === 'welcome' && data.target === myId) startWebRTC(false);
+
+      if (data.type === 'signal') {
+        if (data.sdp) {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          if (data.sdp.type === 'offer') {
+            const ans = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(ans);
+            client.publish(room, JSON.stringify({ type: 'signal', sender: myId, sdp: ans }));
+          }
+        } else if (data.candidate) {
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      }
+
+      // קבלת נזק ישיר
+      if (data.type === 'laser_hit') {
+        myHp = Math.max(0, myHp - data.damage);
+        document.getElementById('my-hp-fill').style.width = myHp + '%';
+        
+        const arena = document.getElementById('arena');
+        arena.classList.remove('screen-hit');
+        void arena.offsetWidth;
+        arena.classList.add('screen-hit');
+
+        client.publish(room, JSON.stringify({ type: 'hp_sync', sender: myId, hp: myHp }));
+        if (myHp <= 0) alert('EYES COMPROMISED! YOU LOST!');
+      }
+
+      // עדכון מד החיים של היריב
+      if (data.type === 'hp_sync') {
+        enemyHp = data.hp;
+        document.getElementById('enemy-hp-fill').style.width = enemyHp + '%';
+        if (enemyHp <= 0) alert('SNIPER ELITE! YOU WIN!');
       }
     });
 
-    window.addEventListener('beforeunload', () => client.publish(room, JSON.stringify({ type: 'bye', sender: myId })));
+    function startWebRTC(isOffer) {
+      peerConnection = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      if (localStream) localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
 
-    function update() {
-      const ok = users.size >= 2;
-      document.getElementById('count').textContent = users.size;
-      const inp = document.getElementById('text-input');
-      inp.disabled = document.getElementById('send-btn').disabled = !ok;
-      inp.placeholder = ok ? 'כתוב הודעה...' : 'מחכה למשתתף נוסף...';
-    }
-
-    function send() {
-      const inp = document.getElementById('text-input');
-      const val = inp.value.trim();
-      if (!val) return;
-      client.publish(room, JSON.stringify({ type: 'msg', sender: myId, color: myColor, text: val }));
-      inp.value = '';
+      peerConnection.ontrack = e => {
+        document.getElementById('peer-video').srcObject = e.streams[0];
+      };
+      peerConnection.onicecandidate = e => {
+        if (e.candidate) client.publish(room, JSON.stringify({ type: 'signal', sender: myId, candidate: e.candidate }));
+      };
+      if (isOffer) {
+        peerConnection.createOffer().then(o => {
+          peerConnection.setLocalDescription(o);
+          client.publish(room, JSON.stringify({ type: 'signal', sender: myId, sdp: o }));
+        });
+      }
     }
   </script>
 </body>
