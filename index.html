@@ -2,30 +2,36 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <title>חדר תקשורת</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 </head>
 <body>
 
-  <div class="card">
+  <main class="card">
     <h2>חדר שיחה</h2>
-    <p>מחוברים כרגע: <strong id="count">1</strong></p>
+    <div class="status-badge">
+      <span class="pulse-dot"></span>
+      <span>מחוברים: <strong id="count">1</strong></span>
+    </div>
     
-    <div class="btn-group">
-      <button class="action-btn" onclick="send('מה איתך?')" disabled>מה איתך?</button>
-      <button class="action-btn green" onclick="send('סבבה!')" disabled>סבבה!</button>
+    <div class="input-group">
+      <input id="text-input" placeholder="מחכה למשתתף נוסף..." disabled onkeydown="if(event.key==='Enter')send()">
+      <button id="send-btn" onclick="send()" disabled>שלח</button>
     </div>
 
-    <div id="msg"></div>
-  </div>
+    <div id="msg-box">ממתין להודעות...</div>
+  </main>
 
   <script>
     let myId = sessionStorage.getItem('userId') || Math.random().toString(36).substring(7);
+    let myColor = sessionStorage.getItem('userColor') || ['#38bdf8','#4ade80','#f472b6','#fbbf24','#a78bfa','#f87171'][Math.floor(Math.random()*6)];
     sessionStorage.setItem('userId', myId);
+    sessionStorage.setItem('userColor', myColor);
 
     const users = new Set([myId]);
-    const room = 'room_daniel_chat_peer_888';
+    const room = 'room_daniel_chat_free_text_777';
     const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
     client.on('connect', () => {
@@ -33,33 +39,37 @@
       client.publish(room, JSON.stringify({ type: 'ping', sender: myId }));
     });
 
-    client.on('message', (topic, payload) => {
-      const data = JSON.parse(payload.toString());
-      if (data.type === 'ping') {
-        users.add(data.sender);
-        client.publish(room, JSON.stringify({ type: 'pong', sender: myId }));
-        update();
-      }
-      if (data.type === 'pong') { users.add(data.sender); update(); }
-      if (data.type === 'bye') { users.delete(data.sender); update(); }
-      if (data.type === 'msg' && data.sender !== myId) {
-        document.getElementById('msg').textContent = data.text;
+    client.on('message', (t, p) => {
+      const d = JSON.parse(p.toString());
+      if (d.type === 'ping') { users.add(d.sender); client.publish(room, JSON.stringify({ type: 'pong', sender: myId })); update(); }
+      if (d.type === 'pong') { users.add(d.sender); update(); }
+      if (d.type === 'bye') { users.delete(d.sender); update(); }
+      if (d.type === 'msg' && d.sender !== myId) {
+        const box = document.getElementById('msg-box');
+        box.textContent = d.text;
+        box.style.color = box.style.borderColor = d.color;
+        box.classList.remove('msg-pop');
+        void box.offsetWidth;
+        box.classList.add('msg-pop');
       }
     });
 
-    window.addEventListener('beforeunload', () => {
-      client.publish(room, JSON.stringify({ type: 'bye', sender: myId }));
-    });
+    window.addEventListener('beforeunload', () => client.publish(room, JSON.stringify({ type: 'bye', sender: myId })));
 
     function update() {
-      const total = users.size;
-      document.getElementById('count').textContent = total;
-      const buttons = document.querySelectorAll('.action-btn');
-      buttons.forEach(btn => btn.disabled = (total < 2));
+      const ok = users.size >= 2;
+      document.getElementById('count').textContent = users.size;
+      const inp = document.getElementById('text-input');
+      inp.disabled = document.getElementById('send-btn').disabled = !ok;
+      inp.placeholder = ok ? 'כתוב הודעה...' : 'מחכה למשתתף נוסף...';
     }
 
-    function send(text) {
-      client.publish(room, JSON.stringify({ type: 'msg', sender: myId, text: text }));
+    function send() {
+      const inp = document.getElementById('text-input');
+      const val = inp.value.trim();
+      if (!val) return;
+      client.publish(room, JSON.stringify({ type: 'msg', sender: myId, color: myColor, text: val }));
+      inp.value = '';
     }
   </script>
 </body>
