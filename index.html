@@ -2,17 +2,55 @@
 <html lang="he" dir="rtl">
 <head>
   <meta charset="UTF-8">
-  <!-- מניעת זום וכיוונון מלא למסך הטלפון -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Cyber Eye-Sniper Duel</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+  <style>
+    /* מסך פתיחה שמאפשר הרשאת מצלמה בלחיצה */
+    #start-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(3, 7, 18, 0.95);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      gap: 15px;
+    }
+    #start-overlay h1 {
+      color: #00f0ff;
+      font-size: 22px;
+      text-shadow: 0 0 10px #00f0ff;
+    }
+    #start-btn {
+      padding: 14px 30px;
+      font-size: 18px;
+      font-weight: bold;
+      color: #030712;
+      background: #00f0ff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 0 20px #00f0ff;
+    }
+  </style>
 </head>
 <body>
 
+  <!-- מסך אישור מצלמה למובייל -->
+  <div id="start-overlay">
+    <h1>CYBER DUEL</h1>
+    <button id="start-btn" onclick="startGame()">הפעל מצלמה והתחל</button>
+  </div>
+
   <div class="arena" id="arena">
-    <!-- playsinline ו-muted חיוניים להרצת וידאו תקינה באייפון/אנדרואיד -->
+    <!-- video עם כל המאפיינים הנדרשים למובייל -->
     <video id="peer-video" autoplay playsinline muted></video>
     <div class="scanlines"></div>
 
@@ -33,38 +71,42 @@
     sessionStorage.setItem('playerId', myId);
 
     const room = 'room_cyber_sniper_duel_2026';
-    
     let myHp = 100;
     let enemyHp = 100;
     const DAMAGE_PER_HIT = 10;
     
     let crossX = 0, crossY = 0;
     let detectedEyes = [];
-
-    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
     let localStream, peerConnection;
 
-    client.on('connect', async () => {
-      client.subscribe(room);
+    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+
+    // פונקציית התחלה שמופעלת מלחיצת המשתמש
+    async function startGame() {
+      document.getElementById('start-overlay').style.display = 'none';
       await initCamera();
       await loadFaceAI();
       client.publish(room, JSON.stringify({ type: 'join', sender: myId }));
+    }
+
+    client.on('connect', () => {
+      client.subscribe(room);
     });
 
-    // פתיחת מצלמה קדמית מותאמת לסמארטפונים
+    // פתיחת מצלמה קדמית עם fallback
     async function initCamera() {
       try {
-        const constraints = {
-          video: {
-            facingMode: 'user', // בוחר במצלמת הסלפי הקדמית
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          },
-          audio: true
-        };
-        localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 480 }, height: { ideal: 640 } },
+          audio: false // ביטול אודיו למניעת שגיאות הרשאה במובייל
+        });
       } catch (e) {
-        console.warn('Camera access error:', e);
+        try {
+          // ניסיון שני למצלמה כללית
+          localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } catch (err) {
+          alert('אנא אשר הרשאת מצלמה בדפדפן (וודא שאתה פותח ב-Safari או Chrome ולא בתוך וואטסאפ)');
+        }
       }
     }
 
@@ -74,7 +116,6 @@
       startEyeTrackingLoop();
     }
 
-    // מעקב אחרי עיני היריב בווידאו
     function startEyeTrackingLoop() {
       const video = document.getElementById('peer-video');
       const leftEyeEl = document.getElementById('left-eye');
@@ -83,7 +124,7 @@
 
       setInterval(async () => {
         if (video.readyState >= 2) {
-          const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224 })).withFaceLandmarks(true);
+          const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 160 })).withFaceLandmarks(true);
           if (detection) {
             const landmarks = detection.landmarks;
             const leftEyePts = landmarks.getLeftEye();
@@ -99,8 +140,8 @@
             const rY = rightEyePts[0].y * scaleY;
 
             detectedEyes = [
-              { x: lX, y: lY, radius: 34 }, // רדיוס מוגדל מעט לנוחות במסכי מגע
-              { x: rX, y: rY, radius: 34 }
+              { x: lX, y: lY, radius: 36 },
+              { x: rX, y: rY, radius: 36 }
             ];
 
             leftEyeEl.style.display = rightEyeEl.style.display = 'block';
@@ -110,10 +151,9 @@
             rightEyeEl.style.top = rY + 'px';
           }
         }
-      }, 90);
+      }, 100);
     }
 
-    // טיפול במיקום (עכבר / מגע)
     function updateAimPosition(clientX, clientY) {
       const rect = document.getElementById('arena').getBoundingClientRect();
       crossX = clientX - rect.left;
@@ -124,7 +164,6 @@
       crosshair.style.top = crossY + 'px';
     }
 
-    // מנגנון ירייה
     function fireAction() {
       if (myHp <= 0 || enemyHp <= 0) return;
 
@@ -153,9 +192,7 @@
       }
     }
 
-    // תמיכה באירועי עכבר ומגע (Touch & Mouse)
     const arenaEl = document.getElementById('arena');
-
     arenaEl.addEventListener('mousemove', e => updateAimPosition(e.clientX, e.clientY));
     arenaEl.addEventListener('click', () => fireAction());
 
@@ -170,7 +207,6 @@
       updateAimPosition(touch.clientX, touch.clientY);
     }, { passive: true });
 
-    // תקשורת רשת
     client.on('message', async (topic, payload) => {
       const data = JSON.parse(payload.toString());
       if (data.sender === myId) return;
@@ -219,7 +255,9 @@
       if (localStream) localStream.getTracks().forEach(t => peerConnection.addTrack(t, localStream));
 
       peerConnection.ontrack = e => {
-        document.getElementById('peer-video').srcObject = e.streams[0];
+        const remoteVideo = document.getElementById('peer-video');
+        remoteVideo.srcObject = e.streams[0];
+        remoteVideo.play().catch(err => console.log('Autoplay play error:', err));
       };
       peerConnection.onicecandidate = e => {
         if (e.candidate) client.publish(room, JSON.stringify({ type: 'signal', sender: myId, candidate: e.candidate }));
